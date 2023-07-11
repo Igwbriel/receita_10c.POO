@@ -6,25 +6,41 @@ class Selection {
   static const List<int> options = [3, 5, 15];
 }
 
-class CustomScroll extends ScrollBehavior {
+class MyCustomScroll extends ScrollBehavior {
   @override
   Widget buildViewportChrome(
     BuildContext context,
-    AxisDirection axisDirection,
     Widget child,
+    AxisDirection axisDirection,
   ) {
     return GlowingOverscrollIndicator(
-      axisDirection: axisDirection,
       child: child,
-      color: Colors.orange,
-      showTrailing: false,
+      axisDirection: axisDirection,
+      color: Colors.red,
       showLeading: false,
+      showTrailing: false,
     );
   }
 }
 
 class MyApp extends StatelessWidget {
   final List<int> loadOptions = Selection.options;
+  final TextEditingController searchController =
+      TextEditingController(); // Novo campo para o controlador de texto da pesquisa
+
+  // Atualizar a consulta de pesquisa
+  void updateSearchQuery(String query) {
+    dataService.tableStateNotifier.value = {
+      ...dataService.tableStateNotifier.value,
+      'status': TableStatus.loading,
+    };
+    Future.delayed(Duration(milliseconds: 500), () {
+      dataService.tableStateNotifier.value = {
+        ...dataService.tableStateNotifier.value,
+        'status': TableStatus.ready,
+      };
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,8 +49,28 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       home: Scaffold(
         appBar: AppBar(
-          title: const Text("Dicas"),
+          title: const Text("Polimorfismo"),
           actions: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+              child: SizedBox(
+                width: 200,
+                child: TextField(
+                  controller: searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Pesquisar...',
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  onChanged: (query) => updateSearchQuery(
+                      query), // Chamar a função updateSearchQuery ao digitar
+                ),
+              ),
+            ),
             PopupMenuButton(
               itemBuilder: (_) => loadOptions
                   .map(
@@ -64,6 +100,8 @@ class MyApp extends StatelessWidget {
                     jsonObjects: value['dataObjects'],
                     propertyNames: value['propertyNames'],
                     columnNames: value['columnNames'],
+                    searchQuery: searchController
+                        .text, // Passar a consulta de pesquisa para o DataTableWidget
                   ),
                 );
               case TableStatus.error:
@@ -97,49 +135,92 @@ class NewNavBar extends HookWidget {
         items: const [
           BottomNavigationBarItem(
               label: "Empresas", icon: Icon(Icons.business)),
-          BottomNavigationBarItem(label: "Comércios", icon: Icon(Icons.sell)),
           BottomNavigationBarItem(
-              label: "Aplicativos", icon: Icon(Icons.app_registration))
+              label: "Aplicativos", icon: Icon(Icons.app_registration)),
+          BottomNavigationBarItem(label: "Comércios", icon: Icon(Icons.sell))
         ]);
   }
 }
 
-class DataTableWidget extends HookWidget {
+class DataTableWidget extends StatelessWidget {
   final List jsonObjects;
   final List<String> columnNames;
   final List<String> propertyNames;
+  final String searchQuery; // Novo campo para a consulta de pesquisa
 
-  DataTableWidget(
-      {this.jsonObjects = const [],
-      this.columnNames = const [],
-      this.propertyNames = const []});
+  DataTableWidget({
+    this.jsonObjects = const [],
+    this.columnNames = const [],
+    this.propertyNames = const [],
+    this.searchQuery = '', // Atribuição do parâmetro searchQuery
+  });
 
   @override
   Widget build(BuildContext context) {
-    final sortAscending = useState(true);
-    final sortColumnIndex = useState(0);
+    List filteredObjects = jsonObjects;
+    var sortCriteria = dataService.tableStateNotifier.value['sortCriteria'];
+    var ascending = dataService.tableStateNotifier.value['ascending'];
 
-    return Center(
-        child: DataTable(
-            sortAscending: sortAscending.value,
-            sortColumnIndex: sortColumnIndex.value,
-            columns: columnNames
-                .map((name) => DataColumn(
-                    onSort: (columnIndex, ascending) {
-                      sortColumnIndex.value = columnIndex;
-                      sortAscending.value = !sortAscending.value;
-                      dataService.ordenarEstadoAtual(
-                          propertyNames[columnIndex], sortAscending.value);
-                    },
-                    label: Expanded(
-                        child: Text(name,
-                            style: TextStyle(fontStyle: FontStyle.italic)))))
-                .toList(),
-            rows: jsonObjects
-                .map((obj) => DataRow(
-                    cells: propertyNames
-                        .map((propName) => DataCell(Text(obj[propName])))
-                        .toList()))
-                .toList()));
+    // Filtrar objetos com base na consulta de pesquisa
+    if (searchQuery.length >= 3) {
+      filteredObjects = jsonObjects.where((obj) {
+        // Verificar se algum valor em qualquer coluna corresponde à pesquisa
+        for (var propName in propertyNames) {
+          String propertyValue = obj[propName].toString().toLowerCase();
+          String query = searchQuery.toLowerCase();
+          if (propertyValue.contains(query)) {
+            return true;
+          }
+        }
+        return false;
+      }).toList();
+    }
+
+    return DataTable(
+      columns: columnNames
+          .asMap()
+          .map(
+            (index, name) => MapEntry(
+              index,
+              DataColumn(
+                onSort: (columnIndex, ascending) =>
+                    dataService.ordenarEstadoAtual(propertyNames[columnIndex]),
+                label: Expanded(
+                  child: InkWell(
+                    onTap: () => dataService.ordenarEstadoAtual(propertyNames[
+                        index]), // Atualizar ordenação ao clicar na coluna
+                    child: Row(
+                      children: [
+                        Text(
+                          name,
+                          style: TextStyle(fontStyle: FontStyle.italic),
+                        ),
+                        if (sortCriteria == propertyNames[index])
+                          Icon(
+                            ascending
+                                ? Icons.arrow_upward
+                                : Icons.arrow_downward,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+          .values
+          .toList(),
+      rows: filteredObjects // Usar os objetos filtrados
+          .map(
+            (obj) => DataRow(
+              cells: propertyNames
+                  .map(
+                    (propName) => DataCell(Text(obj[propName])),
+                  )
+                  .toList(),
+            ),
+          )
+          .toList(),
+    );
   }
 }

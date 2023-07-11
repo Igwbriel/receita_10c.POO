@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../util/ordenador.dart';
 
 var values = [3, 7, 15];
 
@@ -33,8 +32,6 @@ enum ItemType {
 }
 
 class DataService {
-  static final values = [3, 7, 15];
-
   static int get MAX_N_ITEMS => values[2];
   static int get MIN_N_ITEMS => values[0];
   static int get DEFAULT_N_ITEMS => values[1];
@@ -53,43 +50,40 @@ class DataService {
     return _numberOfItems;
   }
 
-  final ValueNotifier<Map<String, dynamic>> tableStateNotifier =
-      ValueNotifier<Map<String, dynamic>>({
+  final ValueNotifier<Map<String, dynamic>> tableStateNotifier = ValueNotifier({
     'status': TableStatus.idle,
     'dataObjects': [],
-    'itemType': ItemType.none
+    'itemType': ItemType.none,
+    'sortCriteria': '',
+    'ascending': true,
   });
 
   void carregar(index) {
-    final params = [ItemType.company, ItemType.commerce, ItemType.app];
+    final params = [ItemType.company, ItemType.app, ItemType.commerce];
+
     carregarPorTipo(params[index]);
   }
 
-  // Ordem crescente e decrescente ao apertar duas vezes na propriedade.
-  void ordenarEstadoAtual(String propriedade, [bool cresc = true]) {
+  void ordenarEstadoAtual(String propriedade) {
     List objetos = tableStateNotifier.value['dataObjects'] ?? [];
+
     if (objetos.isEmpty) return;
-    Ordenador ord = Ordenador();
-    var objetosOrdenados = [];
-    bool crescente = cresc;
-    bool precisaTrocar(atual, proximo) {
-      final ordemCorreta = crescente ? [atual, proximo] : [proximo, atual];
-      return ordemCorreta[0][propriedade]
-              .compareTo(ordemCorreta[1][propriedade]) >
-          0;
+
+    bool ascending = true;
+    var sortCriteria = tableStateNotifier.value['sortCriteria'];
+
+    if (sortCriteria == propriedade) {
+      ascending = !tableStateNotifier.value[
+          'ascending']; // Alternar entre crescente e decrescente se a mesma coluna for clicada novamente
     }
 
-    objetosOrdenados = ord.ssOrdenar(objetos, precisaTrocar);
-    emitirEstadoOrdenado(objetosOrdenados, propriedade);
-  }
+    objetos.sort((a, b) {
+      final valueA = a[propriedade];
+      final valueB = b[propriedade];
+      return ascending ? valueA.compareTo(valueB) : valueB.compareTo(valueA);
+    });
 
-  void emitirEstadoOrdenado(
-    List objetosOrdenados,
-    String propriedade,
-  ) {
-    var estado = Map<String, dynamic>.from(tableStateNotifier.value);
-    estado['dataObjects'] = objetosOrdenados;
-    tableStateNotifier.value = estado;
+    emitirEstadoOrdenado(objetos, propriedade, ascending);
   }
 
   Uri montarUri(ItemType type) {
@@ -103,15 +97,30 @@ class DataService {
   Future<List<dynamic>> acessarApi(Uri uri) async {
     var jsonString = await http.read(uri);
     var json = jsonDecode(jsonString);
+
     json = [...tableStateNotifier.value['dataObjects'], ...json];
+
     return json;
+  }
+
+  void emitirEstadoOrdenado(
+      List objetosOrdenados, String propriedade, bool ascending) {
+    var estado = Map<String, dynamic>.from(tableStateNotifier.value);
+
+    estado['dataObjects'] = objetosOrdenados;
+    estado['sortCriteria'] = propriedade;
+    estado['ascending'] = ascending;
+
+    tableStateNotifier.value = estado;
   }
 
   void emitirEstadoCarregando(ItemType type) {
     tableStateNotifier.value = {
       'status': TableStatus.loading,
       'dataObjects': [],
-      'itemType': type
+      'itemType': type,
+      'sortCriteria': '',
+      'ascending': true,
     };
   }
 
@@ -121,12 +130,15 @@ class DataService {
       'status': TableStatus.ready,
       'dataObjects': json,
       'propertyNames': type.properties,
-      'columnNames': type.columns
+      'columnNames': type.columns,
+      'sortCriteria': '',
+      'ascending': true,
     };
   }
 
   bool temRequisicaoEmCurso() =>
       tableStateNotifier.value['status'] == TableStatus.loading;
+
   bool mudouTipoDeItemRequisitado(ItemType type) =>
       tableStateNotifier.value['itemType'] != type;
 
@@ -147,20 +159,3 @@ class DataService {
 }
 
 final dataService = DataService();
-
-class DecididorJson implements Decididor {
-  final String prop;
-  final bool crescente;
-
-  DecididorJson(this.prop, [this.crescente = true]);
-  @override
-  bool precisaTrocarAtualPeloProximo(
-      dynamic atual, dynamic proximo, bool crescente) {
-    try {
-      final ordemCorreta = crescente ? [atual, proximo] : [proximo, atual];
-      return ordemCorreta[0][prop].compareTo(ordemCorreta[1][prop]) > 0;
-    } catch (error) {
-      return false;
-    }
-  }
-}
